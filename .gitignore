@@ -1,0 +1,5 @@
+.env
+*.wav
+*.mp3
+*.pcm
+node_modules/
