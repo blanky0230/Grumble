@@ -1,13 +1,13 @@
 import { ChatOpenAI } from "langchain/chat_models/openai";
 import { OpenAI } from "langchain/llms/openai";
-import { AgentExecutor, ChatConversationalAgent } from "langchain/agents";
+import { AgentExecutor, ChatConversationalAgent, StructuredChatAgent } from "langchain/agents";
 import { OpenAIWhisperAudio } from "langchain/document_loaders/fs/openai_whisper_audio";
 import { PromptTemplate } from "langchain/prompts";
 import fs from "fs";
 import { execSync } from "child_process";
 import { AudioInput, Queues, TextInput } from "../bot/types";
 import { BufferMemory } from "langchain/memory"
-import { DynamicTool, SerpAPI } from "langchain/tools"
+import { DynamicStructuredTool, DynamicTool, SerpAPI } from "langchain/tools"
 import { Calculator } from "langchain/tools/calculator"
 import dotenv from "dotenv";
 import { RunnableSequence } from "langchain/schema/runnable";
@@ -17,6 +17,7 @@ import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 import { WebBrowser } from "langchain/tools/webbrowser";
 import { MumbleBot } from "../bot/MumbleBot";
 import { TextMessage } from "../generated/src/proto/Mumble_pb";
+import { z } from "zod";
 dotenv.config();
 
 export class LangchainChatter {
@@ -60,12 +61,35 @@ export class LangchainChatter {
             }),
             new WebBrowser({ model: new OpenAI({ temperature: 0 }), embeddings: new OpenAIEmbeddings() }),
             new Calculator(),
-            new DynamicTool({
+            new DynamicStructuredTool({
                 name: "sayTo",
-                description: "Say something. Useful if someone asks you to say something to someone. Usage: say <something>",
-                func: async (input) => {
-                    this.queues.audioGenerationQueue.enqueue({ context: 0, target: 0, text: input });
-                    return input;
+                description: "Say something. Useful if someone asks you to say something to someone.",
+                schema: z.object({
+                    text: z.string().describe('The text to say'),
+                    target: z.number().describe('The targeted user\'s sessionId'),
+                }),
+                func: async ({text, target}) => {
+                    this.queues.audioGenerationQueue.enqueue({ context: 0, target: 0, text: text });
+                    return 'Ok';
+                }
+            }),
+            new DynamicStructuredTool({
+                name: "remindSelf",
+                description: "Set a reminder for someone.",
+                schema: z.object({
+                    seconds: z.number().describe('Time in seconds'),
+                    message: z.string().describe('Message to be sent or said'),
+                    target: z.number().describe('The targeted user\'s sessionId'),
+                    say: z.boolean().optional().default(true).describe('Whether to say the message or send it as a text message'),
+                }),
+                func: async ({say, message, target, seconds }) => {
+                    if (say) {
+                        setTimeout(() => this.queues.textInputQueue.enqueue({ actor: target, session: [this.userRepo.getSelfId()!], message: `sayTo me: ${message}` }), seconds * 1000);
+                    } else {
+                        setTimeout(() => this.queues.textSendQueue.enqueue({ session: [target], message: message, }), seconds * 1000);
+                    }
+
+                    return `Reminder set for ${seconds} seconds`;
                 }
             }),
             ...this.client.generateTools(),
@@ -81,7 +105,7 @@ export class LangchainChatter {
         );
 
         const model = new ChatOpenAI({ modelName: 'gpt-4', temperature: 0 });
-        const agent = ChatConversationalAgent.fromLLMAndTools(model, tools, { systemMessage: '' });
+        const agent = StructuredChatAgent.fromLLMAndTools(model, tools);
         const executor = AgentExecutor.fromAgentAndTools({
             agent: agent,
             tools,
@@ -169,8 +193,9 @@ export class LangchainChatter {
 
         const queryText = await this.repairFromAudioChain.invoke({ raw_sentence: text });
         const initiator = this.userRepo.get(job.senderSession);
+        
         try {
-            this.queues.textSendQueue.enqueue({ message: `${initiator?.name!}: Ich denke nach...` });
+            this.queues.textSendQueue.enqueue({ session: job.context !== 0 ? [job.senderSession]:undefined, channelId: [this.userRepo.getCurrentChannel()!],  message: `${initiator?.name!}: Ich denke nach...` });
             const output = await this.executor.call({ input: `Assistant name is: ${this.username}.\n User name is ${initiator?.name}.\nUser Session is ${job.senderSession}\nQuestion: ${queryText}` });
             const result: string = output.output;
             this.queues.audioGenerationQueue.enqueue({ target: initiator?.session!, context: job.context, text: result });

@@ -2,6 +2,7 @@ import {
   MessageStringToType,
   TCPMessage,
   TCPMessageTypeStrings,
+  adjustNetworkBandwidth,
   toType,
   toTypeNumber,
   toVarint,
@@ -19,7 +20,8 @@ import { AudioGeneration, AudioInput, AudioOutput, Queues, TextInput, TextOutput
 import { AudioInputBuffer } from "./AudioInputBuffer";
 import { AudioReceiver } from "./AudioReceiver";
 import { TextReceiver } from "./TextReceiver";
-import { DynamicTool, Tool } from "langchain/tools";
+import { DynamicStructuredTool, DynamicTool, Tool } from "langchain/tools";
+import { z } from "zod";
 
 type ConnectOptions = {
   port: number;
@@ -85,7 +87,6 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
     this.textReceiver = new TextReceiver(this);
 
     this.audioInputBuffer = new AudioInputBuffer(this.audioReceiver, this.queues.audioInputQueue);
-
   }
 
   connect(): Promise<MumbleBot> {
@@ -99,7 +100,13 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
         }
       );
       this.tcpSocket.on("data", (data) => this._onDataReceived(data));
-      this.on("ServerSync", () => resolve(this));
+      this.on("ServerSync", (sync) => {
+        if (sync.maxBandwidth) {
+          this.opus.setBitrate(adjustNetworkBandwidth(sync.maxBandwidth));
+        }
+
+        resolve(this);
+      });
     });
   }
 
@@ -287,8 +294,6 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
 
     packet.copy(frame, header.length);
 
-    voiceSequence++;
-
     const tunnelHead = this._createMessageHeader(
       "UDPTunnel",
       voiceHeader.length + frame.length
@@ -359,12 +364,15 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
     return 'ok'
   }
 
-  generateTools(): Tool[] {
+  generateTools() {
     return [
-      new DynamicTool({
+      new DynamicStructuredTool({
         name: "joinChannel",
-        description: "useful for when a user asks you to join a channel. Keep in mind: a user's sessionId IS NOT the same as a channelId! Usage: joinChannel <channelId>",
-        func: async (arg: string) => this.joinChannel(parseInt(arg)),
+        description: "useful for when a user asks you to join a channel. Keep in mind: a user's sessionId IS NOT the same as a channelId!",
+        schema: z.object({
+          channelId: z.number().describe('The channelId to join'),
+        }),
+        func: async ({channelId}) => this.joinChannel(channelId),
       }),
       new DynamicTool({
         name: "mute",
@@ -386,22 +394,16 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
         description: "undeafens you",
         func: async (arg: string) => this.undeafen(),
       }),
-      new DynamicTool({
+      new DynamicStructuredTool({
         name: "sendChannelMessage",
-        description: "useful for when a user asks you to send a message to a channel. Use channelLookup if you do not know the channelId. Usage: sendChannelMessage target:<channelId> <message>",
-        func: async (arg: string) => {
-          if (!arg.length) {
-            return "Please provide a message to send!"
-          }
-
-          const target = arg.indexOf('target:') === 0 ? arg.split(' ')[0].split(':')[1] : undefined;
-
-          if (!target) {
-            return "Please provide a target to send the message to in the correct format!";
-          }
-
-          this.queues.textSendQueue.enqueue({ message: arg.replace(`target:${target} `, ''), channelId: [parseInt(target)] });
-          return `Message successfully sent to channel ${target}.`;
+        description: "useful for when a user asks you to send a message to a channel. Use channelLookup if you do not know the channelId.",
+        schema: z.object({
+          channelId: z.number().describe('The channelId to send the message to'),
+          message: z.string().describe('The message to send'),
+        }),
+        func: async ({message, channelId}) => {
+          this.queues.textSendQueue.enqueue({ message, channelId: [channelId] });
+          return `Message successfully sent to channel ${channelId}.`;
         }
       }),
 
@@ -412,34 +414,39 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
           return `Channels: ${this.channels.getAll().map((channel) => channel.name).join(', ')}`;
         }
       }),
-      new DynamicTool({
+      new DynamicStructuredTool({
         name: "channelLookup",
-        description: "useful for when you need the channelId for a specific channel name. Usage: channelLookup <channelName>",
-        func: async (arg: string) => {
-          if (!arg.length) {
-            return "Please provide a channel name to lookup!"
-          }
-          const channelInfo = this.channels.findByName(arg);
+        description: "useful for when you need the channelId for a specific channel name.",
+        schema: z.object({
+          channelName: z.string().describe('The channelName to lookup'),
+        }),
+        func: async ({channelName}) => {
+         const channelInfo = this.channels.findByName(channelName);
 
           if (!channelInfo) {
-            return `No channel found with name ${arg}. Maybe you misspelled it?`;
+            return `No channel found with that name. Maybe you misspelled it?`;
           }
 
           return `${channelInfo.name} has channelId ${channelInfo.channelId}`;
         }
       }),
 
-      new DynamicTool({
+      new DynamicStructuredTool({
         name: "userLookup",
-        description: "useful for when you need more information about a specific user, like at what channel they currently are and more. Usage: userLookup <userIdOrName>",
-        func: async (arg: string) => {
-          if (!arg.length) {
-            return "Please provide a user id or name to lookup!"
+        description: "useful for when you need more information about a specific user, like at what channel they currently are and more.",
+        schema: z.object({
+          userId: z.number().optional().describe('The userId to lookup'),
+          userName: z.string().optional().describe('The userName to lookup'),
+        }),
+        func: async ({userId, userName}) => {
+
+          let userInfo;
+          if(userName) {
+            userInfo = this.users.findByName(userName);
           }
 
-          let userInfo = this.users.findByName(arg);
-          if(!userInfo) {
-            userInfo = this.users.get(parseInt(arg));
+          if (userId) {
+            userInfo = this.users.get(userId);
           }
 
           if (!userInfo) {
@@ -450,21 +457,15 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
         }
       }),
 
-      new DynamicTool({
+      new DynamicStructuredTool({
         name: "sendPrivateChatMessageTool",
-        description: "useful for when a user asks you to send a message directly privately. Usage: sendChatMessage target:<userSession> <message>",
-        func: async (arg: string) => {
-          if (!arg.length) {
-            return "Please provide a message to send!"
-          }
-
-          const target = arg.indexOf('target:') === 0 ? arg.split(' ')[0].split(':')[1] : undefined;
-
-          if (!target) {
-            return "Please provide a target to send the message to in the correct format!";
-          }
-
-          this.queues.textSendQueue.enqueue({ message: arg.replace(`target:${target} `, ''), session: [parseInt(target)] });
+        description: "useful for when a user asks you to send a message directly privately.",
+        schema: z.object({
+          message: z.string().describe('The message to send'),
+          userSessionId: z.number().describe('The user\'s sessionId for the user to send the message to'),
+        }),
+        func: async ({message, userSessionId}) => {
+          this.queues.textSendQueue.enqueue({ message, session: [userSessionId] });
           return `Private message successfully sent.`;
         }
       }),

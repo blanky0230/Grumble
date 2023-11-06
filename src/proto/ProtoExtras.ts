@@ -283,3 +283,22 @@ export function fromVarInt(buf: Buffer): { value: number, consumed: number } {
 
   return retVal;
 }
+
+export function adjustNetworkBandwidth(bitspersec: number): number {
+  let frames = 1
+  let bitrate = 40000 
+
+  if(getNetworkBandwidth(bitrate, frames) > bitspersec) {
+      while(bitrate > 8000 && (getNetworkBandwidth(bitrate, frames) > bitspersec)) {
+          bitrate -= 1000
+      }
+  }
+
+  return bitrate
+}
+
+function getNetworkBandwidth(bitrate: number, frames: number): number {
+  let overhead = 20 + 8 + 4 + 1 + 2 + frames + 12
+  overhead *= (800 / frames)
+  return overhead + bitrate
+}

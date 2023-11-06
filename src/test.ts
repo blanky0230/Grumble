@@ -27,7 +27,7 @@ async function main() {
   const player = new AudioPlayer(client);
   const texter = new TextSender(client);
   await client.connect();
-  client.gotoUser("Blanky-Nix");
+  // client.gotoUser("Blanky-Nix");
 }
 
 main();
