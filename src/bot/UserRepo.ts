@@ -31,12 +31,16 @@ export class UserRepo {
         return this.selfId;
     }
 
+    getCurrentChannel(): number | undefined {
+        return this.users.get(this.selfId!)?.channelId;
+    }
+
     get(id: number): UserState.AsObject | undefined {
         return this.users.get(id);
     }
 
     findByName(name: string): UserState.AsObject | undefined {
-        return Array.from(this.users.values()).find((user) => user.name === name);
+        return Array.from(this.users.values()).find((user) => user.name?.toLowerCase() === name.toLowerCase());
     }
 
     listAllNames(): string[] {

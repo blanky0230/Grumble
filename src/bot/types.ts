@@ -20,14 +20,14 @@ export type AudioGeneration = {
     target: Audio.AsObject["target"],
 }
 
-export type TextInput = TextMessage.AsObject;
-export type TextOutput = TextInput;
+export type TextInput = TextMessage.AsObject & { actor: number }
+export type TextOutput = TextMessage.AsObject & {isError?: boolean};
 
 export type Queues = {
   audioInputQueue: EventemittingQueue<AudioInput>;
   audioGenerationQueue: EventemittingQueue<AudioGeneration>;
   audioPlayQueue: EventemittingQueue<AudioOutput>;
 
-  textSendQueue: EventemittingQueue<Partial<TextOutput>>;
+  textSendQueue: EventemittingQueue<TextOutput>;
   textInputQueue: EventemittingQueue<TextInput>;
 }

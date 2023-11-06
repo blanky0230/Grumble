@@ -2,26 +2,26 @@ import { ChannelState } from "../generated/src/proto/Mumble_pb";
 import { MumbleBot } from "./MumbleBot";
 
 export class ChannelRepo {
-    private channels: Map<number, ChannelState.AsObject>;
+    private channels: Record<number, ChannelState.AsObject>;
     private mumbleBot: MumbleBot;
 
     constructor(mumbleBot: MumbleBot) {
-        this.channels = new Map<number, ChannelState.AsObject>();
+        this.channels = [];
         this.mumbleBot = mumbleBot;
         this.mumbleBot.on("ChannelState", (message) => {
-            this.channels.set(message.channelId!, message);
+            this.channels[message.channelId!] = message
         });
     }
 
     get(id: number): ChannelState.AsObject | undefined {
-        return this.channels.get(id);
+        return this.channels[id]
     }
 
     getAll(): ChannelState.AsObject[] {
-        return Array.from(this.channels.values());
+        return Object.values(this.channels);
     }
 
     findByName(name: string): ChannelState.AsObject | undefined {
-        return Array.from(this.channels.values()).find((channel) => channel.name === name);
+        return Object.values(this.channels).find((channel) => channel.name?.toLowerCase() === name.toLowerCase());
     }
 }

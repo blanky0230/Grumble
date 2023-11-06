@@ -19,6 +19,7 @@ import { AudioGeneration, AudioInput, AudioOutput, Queues, TextInput, TextOutput
 import { AudioInputBuffer } from "./AudioInputBuffer";
 import { AudioReceiver } from "./AudioReceiver";
 import { TextReceiver } from "./TextReceiver";
+import { DynamicTool, Tool } from "langchain/tools";
 
 type ConnectOptions = {
   port: number;
@@ -80,7 +81,7 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
       audioPlayQueue: new EventemittingQueue<AudioOutput>(),
     };
 
-    this.audioReceiver =  new AudioReceiver(this);
+    this.audioReceiver = new AudioReceiver(this);
     this.textReceiver = new TextReceiver(this);
 
     this.audioInputBuffer = new AudioInputBuffer(this.audioReceiver, this.queues.audioInputQueue);
@@ -301,25 +302,173 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
     return 1;
   }
 
-  //TODO: Move these to AITools
-  public gotoChannel(id: number): boolean {
-    const myState = this.users.get(this.users.getSelfId()!);
-    if (myState?.channelId === id) return true;
-    if (!myState) return false;
+
+  joinChannel(channelId: number): 'ok' | 'alreadyInChannel' | 'channelNotFound' {
+    const myState = this.users.get(this.users.getSelfId()!)!;
+    if (myState?.channelId === channelId) return 'alreadyInChannel'
+    if (!this.channels.get(channelId)) return 'channelNotFound'
     this.sendProtocolMessage("UserState", {
       ...myState,
-      channelId: id,
+      channelId: channelId,
       name: undefined,
     });
-    return true;
+    return 'ok'
   }
 
-  public gotoUser(name: string): boolean {
-    this._ensureReady();
-    const user = this.users.findByName(name);
-    if (!user) {
-      return false;
-    }
-    return this.gotoChannel(user.channelId!);
+  mute(): 'ok' | 'alreadyMuted' {
+    const myState = this.users.get(this.users.getSelfId()!)!;
+    if (myState?.mute) return 'alreadyMuted'
+    this.sendProtocolMessage("UserState", {
+      ...myState,
+      mute: true,
+      name: undefined,
+    });
+    return 'ok'
   }
+
+  unmute(): 'ok' | 'alreadyUnmuted' {
+    const myState = this.users.get(this.users.getSelfId()!)!;
+    if (!myState?.mute) return 'alreadyUnmuted'
+    this.sendProtocolMessage("UserState", {
+      ...myState,
+      mute: false,
+      name: undefined,
+    });
+    return 'ok'
+  }
+
+  deafen(): 'ok' | 'alreadyDeafened' {
+    const myState = this.users.get(this.users.getSelfId()!)!;
+    if (myState?.deaf) return 'alreadyDeafened'
+    this.sendProtocolMessage("UserState", {
+      ...myState,
+      deaf: true,
+      name: undefined,
+    });
+    return 'ok'
+  }
+
+  undeafen(): 'ok' | 'alreadyUndeafened' {
+    const myState = this.users.get(this.users.getSelfId()!)!;
+    if (!myState?.deaf) return 'alreadyUndeafened'
+    this.sendProtocolMessage("UserState", {
+      ...myState,
+      deaf: false,
+      name: undefined,
+    });
+    return 'ok'
+  }
+
+  generateTools(): Tool[] {
+    return [
+      new DynamicTool({
+        name: "joinChannel",
+        description: "useful for when a user asks you to join a channel. Keep in mind: a user's sessionId IS NOT the same as a channelId! Usage: joinChannel <channelId>",
+        func: async (arg: string) => this.joinChannel(parseInt(arg)),
+      }),
+      new DynamicTool({
+        name: "mute",
+        description: "mutes you",
+        func: async (arg: string) => this.mute(),
+      }),
+      new DynamicTool({
+        name: "unmute",
+        description: "unmutes you",
+        func: async (arg: string) => this.unmute(),
+      }),
+      new DynamicTool({
+        name: "deafen",
+        description: "deafens you",
+        func: async (arg: string) => this.deafen(),
+      }),
+      new DynamicTool({
+        name: "undeafen",
+        description: "undeafens you",
+        func: async (arg: string) => this.undeafen(),
+      }),
+      new DynamicTool({
+        name: "sendChannelMessage",
+        description: "useful for when a user asks you to send a message to a channel. Use channelLookup if you do not know the channelId. Usage: sendChannelMessage target:<channelId> <message>",
+        func: async (arg: string) => {
+          if (!arg.length) {
+            return "Please provide a message to send!"
+          }
+
+          const target = arg.indexOf('target:') === 0 ? arg.split(' ')[0].split(':')[1] : undefined;
+
+          if (!target) {
+            return "Please provide a target to send the message to in the correct format!";
+          }
+
+          this.queues.textSendQueue.enqueue({ message: arg.replace(`target:${target} `, ''), channelId: [parseInt(target)] });
+          return `Message successfully sent to channel ${target}.`;
+        }
+      }),
+
+      new DynamicTool({
+        name: "channelList",
+        description: "useful for when you need a list of all channels. No input required.",
+        func: async (arg: string) => {
+          return `Channels: ${this.channels.getAll().map((channel) => channel.name).join(', ')}`;
+        }
+      }),
+      new DynamicTool({
+        name: "channelLookup",
+        description: "useful for when you need the channelId for a specific channel name. Usage: channelLookup <channelName>",
+        func: async (arg: string) => {
+          if (!arg.length) {
+            return "Please provide a channel name to lookup!"
+          }
+          const channelInfo = this.channels.findByName(arg);
+
+          if (!channelInfo) {
+            return `No channel found with name ${arg}. Maybe you misspelled it?`;
+          }
+
+          return `${channelInfo.name} has channelId ${channelInfo.channelId}`;
+        }
+      }),
+
+      new DynamicTool({
+        name: "userLookup",
+        description: "useful for when you need more information about a specific user, like at what channel they currently are and more. Usage: userLookup <userIdOrName>",
+        func: async (arg: string) => {
+          if (!arg.length) {
+            return "Please provide a user id or name to lookup!"
+          }
+
+          let userInfo = this.users.findByName(arg);
+          if(!userInfo) {
+            userInfo = this.users.get(parseInt(arg));
+          }
+
+          if (!userInfo) {
+            return `No user found that matches this input!`;
+          }
+
+          return `User ${userInfo.name} has sessionId ${userInfo.session ?? 'unknown'}. Currently at channelId ${userInfo.channelId}, channelName ${this.channels.get(userInfo.channelId!)?.name ?? 'unknown'} and is ${userInfo.mute ? 'muted' : 'not muted'} and ${userInfo.deaf ? 'deafened' : 'not deafened'}.`;
+        }
+      }),
+
+      new DynamicTool({
+        name: "sendPrivateChatMessageTool",
+        description: "useful for when a user asks you to send a message directly privately. Usage: sendChatMessage target:<userSession> <message>",
+        func: async (arg: string) => {
+          if (!arg.length) {
+            return "Please provide a message to send!"
+          }
+
+          const target = arg.indexOf('target:') === 0 ? arg.split(' ')[0].split(':')[1] : undefined;
+
+          if (!target) {
+            return "Please provide a target to send the message to in the correct format!";
+          }
+
+          this.queues.textSendQueue.enqueue({ message: arg.replace(`target:${target} `, ''), session: [parseInt(target)] });
+          return `Private message successfully sent.`;
+        }
+      }),
+    ];
+  }
+
 }

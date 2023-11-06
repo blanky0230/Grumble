@@ -29,32 +29,30 @@ export class DispatchStream extends Stream.Writable {
         this._volume = 1
         this.lastFrameWritten = 0
         this.lastWrite = null
-        this.processInterval = this.open()
+        this.processInterval = null;
     }
 
     open(): NodeJS.Timer {
         if (this.processInterval) return this.processInterval;
 
-        return setInterval(() => 
+        return setInterval(() =>
             this._processAudioBuffer(),
             10
         );
     }
 
-    close(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            try {
-                if (this.processInterval) clearInterval(this.processInterval)
-                this.processInterval = null
-                this.frameQueue = []
-                this.lastFrame = this._createFrameBuffer()
-                this.lastFrameWritten = 0
-                this.lastWrite = null
-                resolve();
-            } catch (e) {
-                reject(e)
-            }
-        });
+    close() {
+        if (this.processInterval) clearInterval(this.processInterval)
+        this.processInterval = null
+        this.frameQueue = []
+        this.lastFrame = this._createFrameBuffer()
+        this.lastFrameWritten = 0
+        this.lastWrite = null
+    }
+
+    reset() {
+        this.close();
+        this.open();
     }
 
     set volume(volume) {
@@ -87,7 +85,7 @@ export class DispatchStream extends Stream.Writable {
         while (this.lastWrite + 10 < Date.now()) {
             if (this.frameQueue.length > 0) {
                 let frame = this.frameQueue.shift();
-                if(!frame) {
+                if (!frame) {
                     console.error("Frame is undefined");
                     continue;
                 }

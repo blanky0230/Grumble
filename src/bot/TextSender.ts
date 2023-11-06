@@ -1,34 +1,42 @@
 import { TextMessage } from "../generated/src/proto/Mumble_pb";
 import { MumbleBot } from "./MumbleBot";
+import { TextOutput } from "./types";
 
 export class TextSender {
     private mumble: MumbleBot;
 
     constructor(mumble: MumbleBot) {
         this.mumble = mumble;
-        this.mumble.getQueues().textSendQueue.on("enqueue", (message) => {
-            this._onTextMessage(message);
+        this.mumble.getQueues().textSendQueue.on("enqueue", () => {
+            const message = this.mumble.getQueues().textSendQueue.deque();
+            if(message) this._onTextMessage(message);
         });
     }
 
-    private _onTextMessage(message: TextMessage.AsObject) {
-        let toSend = {...message};
+    private currentChannel(): number {
+        return this.mumble.users.get(this.mumble.users.getSelfId()!)!.channelId!;
+    }
 
-        if(toSend.message === undefined) {
-            toSend.message = "No Text given?";
-        }
-        
-        if(toSend.channelId === undefined) {
-            console.debug(`No explicit channel given, sending to current channel`);
-            toSend.channelId = [this.mumble.users.get(this.mumble.users.getSelfId()!)!.channelId!];
+    private _onTextMessage(message: TextOutput) {
+
+        if(message.isError) {
+            const send = {...message};
+            delete send.isError;
+            this.mumble.sendProtocolMessage("TextMessage", send);
+            return;
         }
 
-        if(toSend.actor === undefined) {
+        if(message.channelId === undefined && message.session === undefined) {
+            console.error(JSON.stringify(message));
+            console.error(`No explicit channel or recipient! Message will not be sent!`);
+            return;
+        }
+
+        if(message.actor === undefined) {
             console.debug(`No explicit actor given, sending as self`);
-            toSend.actor = this.mumble.users.getSelfId()!;
+            message.actor = this.mumble.users.getSelfId()!;
         }
 
-        this.mumble.sendProtocolMessage("TextMessage", toSend);
-        console.log(`Sent: ${JSON.stringify(this.mumble.getQueues().textSendQueue.deque())}`);
+        this.mumble.sendProtocolMessage("TextMessage", message);
     }
 }

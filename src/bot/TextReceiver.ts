@@ -1,5 +1,6 @@
 import { TextMessage } from "../generated/src/proto/Mumble_pb";
 import { MumbleBot } from "./MumbleBot";
+import { TextInput } from "./types";
 
 export class TextReceiver {
     private mumble: MumbleBot;
@@ -13,6 +14,10 @@ export class TextReceiver {
 
     private _onTextMessage(message: TextMessage.AsObject) {
         const inputQueue = this.mumble.getQueues().textInputQueue;
-        inputQueue.enqueue(message);
+        if(message.actor === undefined) {
+            return;
+        }
+        inputQueue.enqueue(message as TextInput);
+
     }
 }
