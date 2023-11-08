@@ -13,12 +13,10 @@
       devShell = with pkgs; mkShell rec {
         buildInputs = [
           ffmpeg
-          python3
           nodePackages_latest.pnpm
           git
           nodejs
           protobuf
-          unixtools.xxd
         ];
       };
     });

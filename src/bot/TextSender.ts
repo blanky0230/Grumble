@@ -13,10 +13,6 @@ export class TextSender {
         });
     }
 
-    private currentChannel(): number {
-        return this.mumble.users.get(this.mumble.users.getSelfId()!)!.channelId!;
-    }
-
     private _onTextMessage(message: TextOutput) {
 
         if(message.isError) {

@@ -10,7 +10,6 @@ export class AudioPlayer {
     private mumbleBot: MumbleBot;
     private audioPlayQueue: Queues["audioPlayQueue"];
     private runner: MutexRunner;
-
     constructor(mumbleBot: MumbleBot) {
         this.mumbleBot = mumbleBot;
         this.audioPlayQueue = mumbleBot.getQueues().audioPlayQueue;
@@ -22,10 +21,9 @@ export class AudioPlayer {
 
 
     play(task: { file: string }, voiceTarget?: number): Promise<void> {
+        const stream = new DispatchStream(this.mumbleBot, voiceTarget || 0);
         return new Promise((resolve, reject) => {
             console.log(`Playing: ${task.file}`);
-            const stream = new DispatchStream(this.mumbleBot, 0);
-            stream.reset();
 
             const command = ffmpeg(task?.file)
                 .output(stream)
@@ -35,9 +33,12 @@ export class AudioPlayer {
                 .on('error', (e) => {
                     console.error(e);
                     reject(e);
-                });
+                })
                 stream.once('finish', () => {
-                    setTimeout(() => resolve(), 200);
+                    setTimeout(() => resolve(), 20);
+                });
+                stream.on('error', (e) => {
+                    reject(e);
                 });
             command.run()
         });

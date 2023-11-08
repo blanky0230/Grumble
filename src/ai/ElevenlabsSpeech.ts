@@ -3,6 +3,7 @@ import fs from "fs";
 import axios from "axios";
 import { MumbleBot } from "../bot/MumbleBot";
 import { Queues } from "../bot/types";
+import { join } from "path";
 
 export class ElevenlabsSpeech {
     private audioGenerationQueue: Queues["audioGenerationQueue"];
@@ -15,7 +16,7 @@ export class ElevenlabsSpeech {
 
         this.audioGenerationQueue.on("enqueue", async (item) => {
             const info = await this.onGenerateTask();
-            setTimeout(() => this.audioPlayQueue.enqueue({ file: info.fileName, context: item.context, target: item.target }), 300);
+            setTimeout(() => this.audioPlayQueue.enqueue({ file: info.fileName, context: item.context, target: item.target }), 50);
         });
     }
 
@@ -24,7 +25,7 @@ export class ElevenlabsSpeech {
         if(!item) {
             return { status: "error", fileName: "" };
         }
-        const voiceId = "ExHcCt3Fc4eiBjYgZOxY";
+        const voiceId = process.env.ELEVENLABS_VOICE_ID ?? "ExHcCt3Fc4eiBjYgZOxY";
         const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
         const response = await axios(url, {
             method: "POST",
@@ -41,14 +42,13 @@ export class ElevenlabsSpeech {
         });
 
         const fileName = `${Date.now()}-output.mp3`
-        response.data.pipe(fs.createWriteStream(fileName));
-        const writeStream = fs.createWriteStream(fileName)
+        response.data.pipe(fs.createWriteStream(join(process.env.AUDIO_OUTPUT_PATH!, fileName)));
+        const writeStream = fs.createWriteStream(join(process.env.AUDIO_OUTPUT_PATH!,fileName));
         response.data.pipe(writeStream);
 
         return new Promise((resolve, reject) => {
-            const responseJson = { status: "ok", fileName: fileName };
-            writeStream.on('finish', () => resolve(responseJson));
-          
+            const responseJson = { status: "ok", fileName: join(process.env.AUDIO_OUTPUT_PATH!, fileName) };
+            writeStream.on('close', () => resolve(responseJson));
             writeStream.on('error', reject);
           });
     }

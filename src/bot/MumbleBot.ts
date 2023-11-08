@@ -17,10 +17,7 @@ import { ChannelRepo } from "./ChannelRepo";
 import { OpusEncoder } from "@discordjs/opus";
 import { EventemittingQueue } from "../lib/EventEmittingQueue";
 import { AudioGeneration, AudioInput, AudioOutput, Queues, TextInput, TextOutput } from "./types";
-import { AudioInputBuffer } from "./AudioInputBuffer";
-import { AudioReceiver } from "./AudioReceiver";
-import { TextReceiver } from "./TextReceiver";
-import { DynamicStructuredTool, DynamicTool, Tool } from "langchain/tools";
+import { DynamicStructuredTool, DynamicTool } from "langchain/tools";
 import { z } from "zod";
 
 type ConnectOptions = {
@@ -45,9 +42,6 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
   private pingInterval?: NodeJS.Timer;
   private opus: OpusEncoder;
   private queues: Queues;
-  private audioReceiver: AudioReceiver;
-  private audioInputBuffer: AudioInputBuffer;
-  private textReceiver: TextReceiver;
   public readonly options: Options;
   public users: UserRepo;
   public channels: ChannelRepo;
@@ -83,10 +77,18 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
       audioPlayQueue: new EventemittingQueue<AudioOutput>(),
     };
 
-    this.audioReceiver = new AudioReceiver(this);
-    this.textReceiver = new TextReceiver(this);
-
-    this.audioInputBuffer = new AudioInputBuffer(this.audioReceiver, this.queues.audioInputQueue);
+    if(options.debug) {
+      this.queues.audioInputQueue.on('enqueue', (data) => console.log(`[ENQUEUE] audioInputQueue: ${JSON.stringify(data)}`));
+      this.queues.textInputQueue.on('enqueue', (data) => console.log(`[ENQUEUE] textInputQueue: ${JSON.stringify(data)}`));
+      this.queues.audioGenerationQueue.on('enqueue', (data) => console.log(`[ENQUEUE] audioGenerationQueue: ${JSON.stringify(data)}`));
+      this.queues.textSendQueue.on('enqueue', (data) => console.log(`[ENQUEUE] textSendQueue: ${JSON.stringify(data)}`));
+      this.queues.audioPlayQueue.on('enqueue', (data) => console.log(`[ENQUEUE] audioPlayQueue: ${JSON.stringify(data)}`));
+      this.queues.audioInputQueue.on('dequeue', (data) => console.log(`[DEQUE] audioInputQueue: ${JSON.stringify(data)}`));
+      this.queues.textInputQueue.on('dequeue', (data) => console.log(`[DEQUE] textInputQueue: ${JSON.stringify(data)}`));
+      this.queues.audioGenerationQueue.on('dequeue', (data) => console.log(`[DEQUE] audioGenerationQueue: ${JSON.stringify(data)}`));
+      this.queues.textSendQueue.on('dequeue', (data) => console.log(`[DEQUE] textSendQueue: ${JSON.stringify(data)}`));
+      this.queues.audioPlayQueue.on('dequeue', (data) => console.log(`[DEQUE] audioPlayQueue: ${JSON.stringify(data)}`));
+    }
   }
 
   connect(): Promise<MumbleBot> {
@@ -293,6 +295,7 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
     header.copy(frame, 0);
 
     packet.copy(frame, header.length);
+    voiceSequence++;
 
     const tunnelHead = this._createMessageHeader(
       "UDPTunnel",
@@ -322,10 +325,10 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
 
   mute(): 'ok' | 'alreadyMuted' {
     const myState = this.users.get(this.users.getSelfId()!)!;
-    if (myState?.mute) return 'alreadyMuted'
+    if (myState?.selfMute) return 'alreadyMuted'
     this.sendProtocolMessage("UserState", {
       ...myState,
-      mute: true,
+      selfMute: true,
       name: undefined,
     });
     return 'ok'
@@ -333,10 +336,10 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
 
   unmute(): 'ok' | 'alreadyUnmuted' {
     const myState = this.users.get(this.users.getSelfId()!)!;
-    if (!myState?.mute) return 'alreadyUnmuted'
+    if (!myState?.selfMute) return 'alreadyUnmuted'
     this.sendProtocolMessage("UserState", {
       ...myState,
-      mute: false,
+      selfMute: false,
       name: undefined,
     });
     return 'ok'
@@ -344,21 +347,23 @@ export class MumbleBot extends TypedEventEmitter<MessageStringToType> {
 
   deafen(): 'ok' | 'alreadyDeafened' {
     const myState = this.users.get(this.users.getSelfId()!)!;
-    if (myState?.deaf) return 'alreadyDeafened'
+    if (myState?.selfDeaf) return 'alreadyDeafened'
     this.sendProtocolMessage("UserState", {
       ...myState,
-      deaf: true,
-      name: undefined,
+      selfDeaf: true,
+      selfMute: true,
+      name: undefined
     });
     return 'ok'
   }
 
   undeafen(): 'ok' | 'alreadyUndeafened' {
     const myState = this.users.get(this.users.getSelfId()!)!;
-    if (!myState?.deaf) return 'alreadyUndeafened'
+    if (!myState?.selfDeaf) return 'alreadyUndeafened'
     this.sendProtocolMessage("UserState", {
       ...myState,
-      deaf: false,
+      selfDeaf: false,
+      selfMute: false,
       name: undefined,
     });
     return 'ok'

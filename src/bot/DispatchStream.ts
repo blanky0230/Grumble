@@ -29,7 +29,7 @@ export class DispatchStream extends Stream.Writable {
         this._volume = 1
         this.lastFrameWritten = 0
         this.lastWrite = null
-        this.processInterval = null;
+        this.processInterval = this.open();
     }
 
     open(): NodeJS.Timer {

@@ -1,16 +1,15 @@
-import { AudioInputBuffer } from "./bot/AudioInputBuffer";
 import { MumbleBot } from "./bot/MumbleBot";
-import { Queue } from "./lib/Queue";
 import dotenv from "dotenv"
-import { AudioInput } from "./bot/types";
-import { EventemittingQueue } from "./lib/EventEmittingQueue";
 import { LangchainChatter } from "./ai/LangchainChatter";
 import { ElevenlabsSpeech } from "./ai/ElevenlabsSpeech";
 import { AudioPlayer } from "./bot/AudioPlayer";
 import { TextSender } from "./bot/TextSender";
+import { TextReceiver } from "./bot/TextReceiver";
+import { AudioInputBuffer } from "./bot/AudioInputBuffer";
+import { AudioReceiver } from "./bot/AudioReceiver";
 dotenv.config();
 
-const username = "Harald";
+const username = "Axel";
 
 async function main() {
   const client = new MumbleBot({
@@ -22,12 +21,18 @@ async function main() {
   });
 
 
-  const chatter = new LangchainChatter(client);
-  const elevenlabs = new ElevenlabsSpeech(client);
-  const player = new AudioPlayer(client);
-  const texter = new TextSender(client);
+  //Enables the "Bot" to send and receive text messages
+  new TextReceiver(client);
+  new TextSender(client);
+
+  //Enables the "Bot" to send and receive audio
+  new AudioPlayer(client);
+  new AudioInputBuffer(new AudioReceiver(client), client);
+
+  //Actual "AI" stuff
+  new LangchainChatter(client);
+  new ElevenlabsSpeech(client);
   await client.connect();
-  // client.gotoUser("Blanky-Nix");
 }
 
 main();

@@ -2,28 +2,21 @@ import { UserState } from "../generated/src/proto/Mumble_pb";
 import { MumbleBot } from "./MumbleBot";
 
 export class UserRepo {
-    private users: Map<number, UserState.AsObject>;
+    private users: Record<number, UserState.AsObject>;
     private mumbleBot: MumbleBot;
     private selfId?: number;
 
     constructor(mumbleBot: MumbleBot) {
-        this.users = new Map<number, UserState.AsObject>();
+        this.users = [];
         this.mumbleBot = mumbleBot;
         this.mumbleBot.on("UserState", (message) => {
             if(message.name === this.mumbleBot.options.username) {
                 this.selfId = message.session;
             }
-
-            if(!this.users.has(message.session!)) {
-                this.users.set(message.session!, message);
-            } else {
-                this.users.get(message.session!)!.channelId = message.channelId;
-            }
+            this.users[message.session!] = message;
         });
         this.mumbleBot.on("UserRemove", (message) => {
-            if(this.users.has(message.session!)) {
-                this.users.delete(message.session!);
-            }
+            delete this.users[message.session!] 
         });
     }
 
@@ -32,22 +25,23 @@ export class UserRepo {
     }
 
     getCurrentChannel(): number | undefined {
-        return this.users.get(this.selfId!)?.channelId;
+        if(!this.selfId) return undefined;
+        return this.users[this.selfId].channelId;
     }
 
     get(id: number): UserState.AsObject | undefined {
-        return this.users.get(id);
+        return this.users[id]
     }
 
     findByName(name: string): UserState.AsObject | undefined {
-        return Array.from(this.users.values()).find((user) => user.name?.toLowerCase() === name.toLowerCase());
+        return Object.values(this.users).find((user) => user.name?.toLowerCase() === name.toLowerCase());
     }
 
     listAllNames(): string[] {
-        return Array.from(this.users.values()).map((user) => user.name!);
+        return Object.values(this.users).map((user) => user.name!);
     }
 
     all(): UserState.AsObject[] {
-        return Array.from(this.users.values());
+        return Object.values(this.users);
     }
 }
